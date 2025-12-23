@@ -9,21 +9,20 @@ export interface ExtendedAlbum {
 }
 
 /**
- * Searches for albums globally without forcing a specific country initially.
- * This ensures we find artists that might only be in specific local storefronts.
+ * Searches for albums globally with enhanced error handling for Netlify and browser environments.
  */
 export const searchAlbums = async (query: string) => {
   try {
-    // Search without country code first to get the most inclusive list of albums
+    // Force HTTPS and use clear terms
     const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=album&limit=200`;
     console.log("Searching discography:", url);
     
     const res = await fetch(url).catch(err => {
-      console.error("Fetch network error:", err);
-      throw new Error("Network error while searching discography");
+      console.error("Network error during search:", err);
+      throw new Error("FAILED_TO_FETCH");
     });
 
-    if (!res.ok) throw new Error(`Search request failed with status: ${res.status}`);
+    if (!res.ok) throw new Error(`Search failed: ${res.status}`);
     
     const data = await res.json();
     if (!data.results || !Array.isArray(data.results)) return [];
@@ -39,7 +38,7 @@ export const searchAlbums = async (query: string) => {
         fallbackTracks: []
       }));
 
-    // Return unique albums sorted by year
+    // deduplicate and sort
     const uniqueAlbums = Array.from(new Map(albums.map(a => [a.id, a])).values());
     return uniqueAlbums.sort((a, b) => parseInt(b.year) - parseInt(a.year));
   } catch (error) {
@@ -49,7 +48,7 @@ export const searchAlbums = async (query: string) => {
 };
 
 /**
- * Retrieves tracks for an album using a fallback mechanism to maximize the chance of finding audio previews.
+ * Retrieves tracks with a fallback chain (Default -> US -> UK) to find audio previews.
  */
 export const getAlbumTracks = async (albumId: string) => {
   const fetchWithCountry = async (country?: string) => {
@@ -78,22 +77,12 @@ export const getAlbumTracks = async (albumId: string) => {
   try {
     console.log("Loading tracks for album ID:", albumId);
     
-    // Step 1: Try default (based on IP location)
+    // Chain attempts to find audio
     let tracks = await fetchWithCountry();
-    
-    // Step 2: Fallback to US storefront (most robust preview library)
-    if (tracks.length === 0) {
-      console.warn("No default tracks found, attempting US storefront...");
-      tracks = await fetchWithCountry('US');
-    }
-
-    // Step 3: Fallback to UK storefront (another major hub)
-    if (tracks.length === 0) {
-      console.warn("No US tracks found, attempting UK storefront...");
-      tracks = await fetchWithCountry('GB');
-    }
+    if (tracks.length === 0) tracks = await fetchWithCountry('US');
+    if (tracks.length === 0) tracks = await fetchWithCountry('GB');
       
-    console.log(`Retrieved ${tracks.length} valid audio tracks for album ${albumId}`);
+    console.log(`Retrieved ${tracks.length} audio tracks for album ${albumId}`);
     return tracks;
   } catch (error) {
     console.error("Track Extraction Error:", error);
